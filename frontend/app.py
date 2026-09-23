@@ -174,8 +174,11 @@ class AgendaApp(QWidget):
 
 
     def fetch_tasks(self):
+        print("-> fetch_tasks çağrıldı, API'ye istek atılıyor...")
         try:
             response = requests.get("http://127.0.0.1:8000/tasks/")
+            print(f"<- API Yanıt Kodu: {response.status_code}")
+            print(f"<- Gelen Veri: {response.text}")
             if response.status_code == 200:
                 tasks = response.json()
                 self.task_list_widget.clear()
@@ -197,9 +200,10 @@ class AgendaApp(QWidget):
 
                 self.label.setText(f"Toplam görev sayısı: {len(tasks)}")
             else:
+                print(f"⚠️ Sunucu 200 dışı kod döndürdü: {response.status_code}")
                 QMessageBox.warning(self,"Hata","Backend'den veri alınamadı.")
         except Exception as e:
-            print("Backend Error",repr(e))
+            print(f"❌ Kritik Bağlantı Hatası: {e}")
             QMessageBox.critical(self,"Bağlantı Hatası",f"API'ye ulasılamıyor \n{e}")
 
     def postpone_task(self):

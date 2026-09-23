@@ -56,20 +56,51 @@ def get_tasks():
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT id, title, TO_CHAR(due_date, 'YYYY-MM-DD') FROM tasks")
+        # Tarih dönüşümüyle uğraşmadan doğrudan kolonları çekiyoruz
+        cursor.execute("SELECT id, title, due_date FROM tasks")
         rows = cursor.fetchall()
-
+        
         tasks = []
         for row in rows:
+            # Oracle'dan gelen tarih objesini güvenle string'e çevirelim
+            raw_date = row[2]
+            date_str = raw_date.strftime("%Y-%m-%d") if raw_date else "Tarihsiz"
+            
             tasks.append({
-                "id":row[0],
-                "title":row[1],
-                "due_date":row[2] if row[2] else QDate.currentDate().toString("yyyy-MM-dd")
-                
+                "id": row[0],
+                "title": row[1],
+                "due_date": date_str
             })
         return tasks
     except Exception as e:
-        raise HTTPException(status_code=500,detail=str(e))
+        print("GET TASKS HATASI:", repr(e))
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.patch("/tasks/{task_id}")
+async def update_task(task_id: int, request: Request):
+    body = await request.json()
+    new_date = body.get("due_date") # "2026-09-23" gibi string geliyor
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Python tarafında string gelen tarihi Oracle'ın DATE tipine uygun formatlıyoruz
+        cursor.execute(
+            "UPDATE tasks SET due_date = TO_DATE(:due_date, 'YYYY-MM-DD') WHERE id = :id",
+            {"due_date": new_date, "id": task_id}
+        )
+        conn.commit()
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Görev bulunamadı")
+        return {"message": "Görev başarıyla ertelendi"}
+    except Exception as e:
+        conn.rollback()
+        print("UPDATE TASK HATASI:", repr(e))
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         cursor.close()
         conn.close()
@@ -148,32 +179,4 @@ def delete_task(task_id: int):
         cursor.close()
         conn.close()
 
-@app.patch("/tasks/{task_id}")
-async def update_task(task_id:int,request:Request):
-    body = await request.json()
-    new_date = body.get("due_date")
 
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    try:
-        #Oracle DB'de görevin tarihinin güncelleme sorgusu
-        cursor.execute("UPDATE tasks SET due_date = TO_DATE(:due_date, 'YYYY-MM-DD') WHERE id = :id",
-            {"due_date": new_date, "id": task_id})
-        conn.commit()
-        if cursor.rowcount == 0:
-            raise HTTPException(status_code=404,detail="Görev Bulunamadı")
-        return {
-            "message":"Görev başarıyla ertelendi."
-            }
-
-    except Exception as e:
-        conn.rollback()
-
-        print("Gercek Hata Detayı:",repr(e))
-        raise HTTPException(status_code=500,detail=str(e))
-    finally:
-        
-        cursor.close()
-        conn.close()
-        

@@ -1,7 +1,8 @@
 import sys
-from PySide6.QtWidgets import (QApplication,QWidget,QLabel,QVBoxLayout,QHBoxLayout,QPushButton,QMessageBox,
+from PySide6.QtWidgets import (QApplication,QWidget,QLabel,QVBoxLayout,     QHBoxLayout,QPushButton,QMessageBox,
                                QLineEdit,QListWidget,QListWidgetItem,QCalendarWidget)
 from PySide6.QtCore import Qt,QDate
+from PySide6.QtGui import Qt,QTextCharFormat,QColor
 import requests
 
 class AgendaApp(QWidget):
@@ -9,6 +10,7 @@ class AgendaApp(QWidget):
         super().__init__()
         self.initUI()
         self.fetch_tasks()
+        self.calendar.selectionChanged.connect(self.fetch_tasks)
 
 
     def initUI(self):
@@ -174,14 +176,19 @@ class AgendaApp(QWidget):
 
 
     def fetch_tasks(self):
-        print("-> fetch_tasks çağrıldı, API'ye istek atılıyor...")
+        print("-> Tüm görevler yükleniyor ve takvim güncelleniyor...")
         try:
             response = requests.get("http://127.0.0.1:8000/tasks/")
             print(f"<- API Yanıt Kodu: {response.status_code}")
             print(f"<- Gelen Veri: {response.text}")
+
             if response.status_code == 200:
                 tasks = response.json()
                 self.task_list_widget.clear()
+
+                #---O an takvimde seçili olan tarihi alıyor
+                selected_date_str = self.calendar.selectedDate().toString("yyyy-MM-dd")
+                selected_date_task = []
 
                 for task in tasks:
                     #Backendden gelen verinin yapısına göre başlık alanını yazdır
@@ -189,16 +196,44 @@ class AgendaApp(QWidget):
                     task_id = task.get("id")
                      #Veritabanındakı gerce id,Oracle farklı satırlara atabilir diye
                     due_date = task.get("due_date")
+
                     if not due_date or due_date == "None":
                         due_date = "Tarihsiz"
+                    else:
+                        #Takvim üzerinde görev olan günü renklendirelim
+                        try:
+                            #Önce QDate ile parse etneye çalışalım
+                            q_date = QDate.fromString(due_date,"dd-MM-yy")
+                            if not q_date.isValid():
+                                q_date = QDate.fromString(due_date,"yyyy-MM-dd")
+
+                            if q_date.isValid():
+                                normalized_date = q_date.toString("yyyy-MM-dd")
+
+                                day_format = QTextCharFormat()
+                                day_format.setFontWeight(75)
+                                day_format.setForeground(QColor("#ff79c6"))
+                                self.calendar.setDateTextFormat(q_date,day_format)
+
+                                 #Eğer görevin tarihi,o an takvimdeki güne uyuyorsa listeye eklemek üzere seçelim
+                                if normalized_date == selected_date_str:
+                                                        selected_date_task.append(task)
+                        except Exception as e:
+                            print(f"Takvim işaretleme hatası: {e}")
+                #Sağ tarafa sadece seçilen günün görevlerini basalım
+                for task in selected_date_task:
+                    title = task.get("title") or task.get("task_title") or str(task)
+                    task_id = task.get("id")
+                    due_date = task.get("due_date")
+
 
                     # Listeye öğe eklerken PyQt'nin kendi içine veri (setData/UserRole) saklanacak
-                    item = QListWidgetItem(f"📅 [{due_date}] -> {title}")
+                    item = QListWidgetItem(f"📌 [{due_date}]->{title}")
                     item.setData(Qt.UserRole,task_id) #Gerçek B eleman ID
 
                     self.task_list_widget.addItem(item)
 
-                self.label.setText(f"Toplam görev sayısı: {len(tasks)}")
+                self.label.setText(f"Tarih {selected_date_str} (Görev: {len(selected_date_task)})")
             else:
                 print(f"⚠️ Sunucu 200 dışı kod döndürdü: {response.status_code}")
                 QMessageBox.warning(self,"Hata","Backend'den veri alınamadı.")

@@ -64,7 +64,7 @@ def get_tasks():
         for row in rows:
             # Oracle'dan gelen tarih objesini güvenle string'e çevirelim
             raw_date = row[2]
-            date_str = raw_date.strftime("%Y-%m-%d") if raw_date else "Tarihsiz"
+            date_str = str(raw_date) if raw_date else "Tarihsiz"
             
             tasks.append({
                 "id": row[0],

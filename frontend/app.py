@@ -1,6 +1,6 @@
 import sys
 from PySide6.QtWidgets import (QApplication,QWidget,QLabel,QVBoxLayout,     QHBoxLayout,QPushButton,QMessageBox,
-                               QLineEdit,QListWidget,QListWidgetItem,QCalendarWidget)
+                               QLineEdit,QListWidget,QListWidgetItem,QCalendarWidget,QDialog,QDialogButtonBox)
 from PySide6.QtCore import Qt,QDate
 from PySide6.QtGui import Qt,QTextCharFormat,QColor
 import requests
@@ -120,7 +120,7 @@ class AgendaApp(QWidget):
         btn_layout.addWidget(self.btn_add)
 
         # Ertele Butonu
-        self.btn_postpone = QPushButton("Ertele (+1 Gün)", self)
+        self.btn_postpone = QPushButton("Ertele", self)
         self.btn_postpone.setStyleSheet("background-color: #fab387; color: #1e1e2e;")
         self.btn_postpone.clicked.connect(self.postpone_task)
         btn_layout.addWidget(self.btn_postpone)
@@ -190,6 +190,21 @@ class AgendaApp(QWidget):
                 selected_date_str = self.calendar.selectedDate().toString("yyyy-MM-dd")
                 selected_date_task = []
 
+                months = {
+                    "JAN":1,
+                    "FEB":2,
+                    "MAR":3,
+                    "APR":4,
+                    "MAY":5,
+                    "JUN":6,
+                    "JUL":7,
+                    "AUG":8,
+                    "SEP":9,
+                    "OCT":10,
+                    "NOV":11,
+                    "DEC":12
+                }
+
                 for task in tasks:
                     #Backendden gelen verinin yapısına göre başlık alanını yazdır
                     title = task.get("title") or task.get("task_title") or str(task)
@@ -197,17 +212,36 @@ class AgendaApp(QWidget):
                      #Veritabanındakı gerce id,Oracle farklı satırlara atabilir diye
                     due_date = task.get("due_date")
 
-                    if not due_date or due_date == "None":
-                        due_date = "Tarihsiz"
+                    if not due_date or due_date == "None" or due_date == "Tarihsiz":
+                        continue
                     else:
                         #Takvim üzerinde görev olan günü renklendirelim
                         try:
+                            normalized_date = ""
+                            q_date = None
+                            #Oracle formatı kontrolü
+                            if "-" in due_date and len(due_date.split("-")) == 3:
+                                parts = due_date.split("-")
+                                day_part = parts[0]
+                                month_str = parts[1].upper()
+                                year_part = parts[2]
+
+                                if month_str in months:
+                                    day = int(day_part)
+                                    month = months[month_str]
+                                    #Yıl 26 ise 2026 yap
+                                    year = int(year_part)
+                                    if year < 100:
+                                        year += 2000
+
+                                    q_date = QDate(year,month,day)
+
                             #Önce QDate ile parse etneye çalışalım
-                            q_date = QDate.fromString(due_date,"dd-MM-yy")
-                            if not q_date.isValid():
+                            
+                            if not q_date or not q_date.isValid():
                                 q_date = QDate.fromString(due_date,"yyyy-MM-dd")
 
-                            if q_date.isValid():
+                            if q_date and q_date.isValid():
                                 normalized_date = q_date.toString("yyyy-MM-dd")
 
                                 day_format = QTextCharFormat()
@@ -217,18 +251,31 @@ class AgendaApp(QWidget):
 
                                  #Eğer görevin tarihi,o an takvimdeki güne uyuyorsa listeye eklemek üzere seçelim
                                 if normalized_date == selected_date_str:
-                                                        selected_date_task.append(task)
+                                    selected_date_task.append(task)
+
                         except Exception as e:
                             print(f"Takvim işaretleme hatası: {e}")
+
                 #Sağ tarafa sadece seçilen günün görevlerini basalım
                 for task in selected_date_task:
                     title = task.get("title") or task.get("task_title") or str(task)
                     task_id = task.get("id")
                     due_date = task.get("due_date")
 
+                    #Erteleme sayısı alalım(Backendden)
+                    postpone_count = task.get("postpone_count",0)
+
+                    # Disiplin Kuralı: Eğer görev 3 kereden fazla ertelenmişse ekranda uyarı rozeti gösterelim
+                    if postpone_count >= 3:
+                        display_text = f"⚠️ [{due_date}] {title}  (Çok Ertelendi: {postpone_count} kez!)Disipline sadık kal ve ya görevi sil!"
+                    elif postpone_count > 0:
+                        display_text = f"📌 [{due_date}] {title}  (Erteleme: {postpone_count})"
+                    else:
+                        display_text = f"📌 [{due_date}] {title}"
+
 
                     # Listeye öğe eklerken PyQt'nin kendi içine veri (setData/UserRole) saklanacak
-                    item = QListWidgetItem(f"📌 [{due_date}]->{title}")
+                    item = QListWidgetItem(display_text)
                     item.setData(Qt.UserRole,task_id) #Gerçek B eleman ID
 
                     self.task_list_widget.addItem(item)
@@ -248,18 +295,44 @@ class AgendaApp(QWidget):
                 return
     
             task_id = current_item.data(Qt.UserRole)
+
+            #---Kullanıcıya yeni tarihi soran mini pencere(DIALOG)---
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Görevi Ertele")
+            dialog.resize(550,750)
+
+            layout = QVBoxLayout(dialog)
+
+            #İçine minik bir takvim koydum
+            date_picker = QCalendarWidget(dialog)
+            layout.addWidget(date_picker)
+
+            #Kaydet ve İptal butonları
+            buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,dialog)
+            buttons.accepted.connect(dialog.accept)
+            buttons.rejected.connect(dialog.reject)
+            layout.addWidget(buttons)
+
+            #Kullanıcı tarih seçip OK tuşuna basarsa
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                q_date = date_picker.selectedDate()
+                selected_date = q_date.toString("yyyy-MM-dd")
+
+                print(f"->Seçilen Hedef tarih:{selected_date}")
+
+                if not selected_date:
+                    QMessageBox.warning(self, "Uyarı", "Geçerli bir tarih seçilmedi!")
+                    return
     
-            from datetime import datetime,timedelta
-    
-            selected_date = self.calendar.selectedDate().toString("yyyy-MM-dd")
-    
-            payload =  {
-                "due_time": selected_date
-            }
+                payload =  {
+                "due_date": selected_date
+                }
     
             try:
                 #Backende güncelleme Endpointi
                 response = requests.patch(f"http://127.0.0.1:8000/tasks/{task_id}",json=payload)
+                print(f"<-Erteleme yanıt kodu:{response.status_code},Yanıt:{response.text}")
+
                 if response.status_code in [200,204]:
                     self.fetch_tasks()
                 else:

@@ -24,3 +24,6 @@ ALTER TABLE tasks MODIFY due_date DATE;
 
 -- Tablodaki tüm verileri temizleyip ID'yi 1'den başlatmak için:
 TRUNCATE TABLE tasks;
+
+--Erteleme sayacı kolonu
+ALTER TABLE tasks ADD postpone_count NUMBER DEFAULT 0;

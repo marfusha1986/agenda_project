@@ -15,9 +15,6 @@ class TaskCreate(BaseModel):
     is_recurring:int=0
     category:Optional[str] = "Genel"
 
-class TaskUpdate(BaseModel):
-    due_time:Optional[str] = None
-
 @app.get("/")
 def read_root():
     return{"message":"Agenda API çalışıyor!"}
@@ -57,7 +54,7 @@ def get_tasks():
     cursor = conn.cursor()
     try:
         # Tarih dönüşümüyle uğraşmadan doğrudan kolonları çekiyoruz
-        cursor.execute("SELECT id, title, due_date FROM tasks")
+        cursor.execute("SELECT id, title, due_date, NVL(postpone_count, 0) FROM tasks")
         rows = cursor.fetchall()
         
         tasks = []
@@ -69,7 +66,8 @@ def get_tasks():
             tasks.append({
                 "id": row[0],
                 "title": row[1],
-                "due_date": date_str
+                "due_date": date_str,
+                "postpone_count":row[3]
             })
         return tasks
     except Exception as e:
@@ -79,24 +77,29 @@ def get_tasks():
         cursor.close()
         conn.close()
 
+class TaskUpdate(BaseModel):
+    due_date:Optional[str] = None
 
 @app.patch("/tasks/{task_id}")
-async def update_task(task_id: int, request: Request):
-    body = await request.json()
-    new_date = body.get("due_date") # "2026-09-23" gibi string geliyor
+def update_task(task_id: int, task_data:TaskUpdate):
+    print(f"-> Gelen Güncelleme İsteği:{task_id},Tarih:{task_data.due_date}")
+
+    if not task_data.due_date:
+        raise HTTPException(status_code=400,detail="Tarih boş olamaz!")
     
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
         # Python tarafında string gelen tarihi Oracle'ın DATE tipine uygun formatlıyoruz
         cursor.execute(
-            "UPDATE tasks SET due_date = TO_DATE(:due_date, 'YYYY-MM-DD') WHERE id = :id",
-            {"due_date": new_date, "id": task_id}
+            "UPDATE tasks SET due_date = TO_DATE(:due_date, 'YYYY-MM-DD'),postpone_count = NVL(postpone_count,0) + 1 WHERE id = :id",
+            {"due_date": task_data.due_date, "id": task_id}
         )
         conn.commit()
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Görev bulunamadı")
-        return {"message": "Görev başarıyla ertelendi"}
+        return {"message": "Görev başarıyla ertelendi,disiplin sayacı güncellendi"}
+    
     except Exception as e:
         conn.rollback()
         print("UPDATE TASK HATASI:", repr(e))
